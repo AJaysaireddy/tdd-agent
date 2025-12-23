@@ -1,6 +1,7 @@
 import sys
 import io
 import unittest
+from types import ModuleType
 from app.state import AgentState
 from app.chains import generate_chain, reflect_chain, test_chain
 
@@ -42,12 +43,12 @@ import sys
 import unittest
 from types import ModuleType
 
-# 1. Create fake module
+# 1. Create fake module for the solution
 sol = ModuleType('solution')
 sys.modules['solution'] = sol
 exec('''{solution_code}''', sol.__dict__)
 
-# 2. Load the tests
+# 2. Load the tests definition
 {test_code}
 
 # 3. FORCE RUN
@@ -68,27 +69,21 @@ if __name__ == '__main__':
     
     if not result.wasSuccessful():
         print("FAILED")
-        sys.exit(1)
+        # We do NOT exit here, we just print FAILED so the node catches it.
 """
     
     old_stderr = sys.stderr
     sys.stderr = io.StringIO()
     
     try:
+        # Execute the script that runs the tests
         exec(full_script, {'__name__': '__main__'})
         output_log = sys.stderr.getvalue()
         
         # Double check if it actually ran tests
         if "Ran 0 tests" in output_log or "NO TESTS RAN" in output_log:
-             return {"output": output_log, "error": "No tests were found to run!"}
+             return {"output": output_log, "error": "No tests were found to run! (Check naming convention)"}
 
-        if "FAILED" in output_log or "Error" in output_log:
-            return {"output": output_log, "error": output_log}
-        else:
-            return {"output": output_log, "error": None}
-            
-    except SystemExit:
-        output_log = sys.stderr.getvalue()
         if "FAILED" in output_log or "Error" in output_log:
             return {"output": output_log, "error": output_log}
         else:

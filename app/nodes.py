@@ -30,14 +30,19 @@ def generation_node(state: AgentState):
         "error": None
     }
 
-# --- Node 3: Execute (The Fix: Manual Test Loader) ---
+# --- Node 3: Execute (The Fix: Remove rogue main() and Force Run) ---
 def execution_node(state: AgentState):
     print("--- EXECUTING TESTS ---")
     
     solution_code = state["code"]
     test_code = state["test_code"]
     
-    # We explicitly find the test class and run it, instead of relying on unittest.main()
+    # CRITICAL FIX: The agent writes "unittest.main()" which confuses the app.
+    # We remove it so WE can control the execution.
+    if "unittest.main()" in test_code:
+        test_code = test_code.replace("unittest.main()", "pass")
+
+    # We explicitly find the test class and run it
     full_script = f"""
 import sys
 import unittest
@@ -52,24 +57,23 @@ exec('''{solution_code}''', sol.__dict__)
 {test_code}
 
 # 3. FORCE RUN
-if __name__ == '__main__':
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
+# We scan for the class manually to ensure we find it.
+loader = unittest.TestLoader()
+suite = unittest.TestSuite()
 
-    # Find the Test Class dynamically (Look for any class inheriting from TestCase)
-    test_cases = [obj for name, obj in locals().items() 
-                  if isinstance(obj, type) and issubclass(obj, unittest.TestCase)]
-    
-    for test_class in test_cases:
-        suite.addTests(loader.loadTestsFromTestCase(test_class))
+# Find the Test Class dynamically (Look for any class inheriting from TestCase)
+test_cases = [obj for name, obj in locals().items() 
+              if isinstance(obj, type) and issubclass(obj, unittest.TestCase)]
 
-    # Run with a text runner so we capture the output
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-    
-    if not result.wasSuccessful():
-        print("FAILED")
-        # We do NOT exit here, we just print FAILED so the node catches it.
+for test_class in test_cases:
+    suite.addTests(loader.loadTestsFromTestCase(test_class))
+
+# Run with a text runner so we capture the output
+runner = unittest.TextTestRunner(verbosity=2)
+result = runner.run(suite)
+
+if not result.wasSuccessful():
+    print("FAILED")
 """
     
     old_stderr = sys.stderr
@@ -82,6 +86,7 @@ if __name__ == '__main__':
         
         # Double check if it actually ran tests
         if "Ran 0 tests" in output_log or "NO TESTS RAN" in output_log:
+             # Fallback: If still 0, it means the class finding failed.
              return {"output": output_log, "error": "No tests were found to run! (Check naming convention)"}
 
         if "FAILED" in output_log or "Error" in output_log:

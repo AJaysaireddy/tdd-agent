@@ -1,3 +1,34 @@
+import sys
+import io
+import unittest
+from app.state import AgentState
+from app.chains import generate_chain, reflect_chain, test_chain
+
+# --- Node 1: Write Tests ---
+def test_generation_node(state: AgentState):
+    print("--- GENERATING TESTS ---")
+    response = test_chain.invoke({"requirement": state["requirement"]})
+    cleaned_tests = response.content.replace("```python", "").replace("```", "").strip()
+    return {"test_code": cleaned_tests}
+
+# --- Node 2: Write Solution ---
+def generation_node(state: AgentState):
+    print("--- GENERATING SOLUTION ---")
+    response = generate_chain.invoke({
+        "requirement": state["requirement"],
+        "test_code": state["test_code"], # Pass tests so it knows what to satisfy
+        "code": state.get("code", ""),
+        "error": state.get("error", ""),
+        "reflection": state.get("reflection", "")
+    })
+    cleaned_code = response.content.replace("```python", "").replace("```", "").strip()
+    
+    return {
+        "code": cleaned_code,
+        "iterations": state.get("iterations", 0) + 1,
+        "error": None
+    }
+
 # --- Node 3: Execute (Run Tests vs Solution) ---
 def execution_node(state: AgentState):
     print("--- EXECUTING TESTS ---")
@@ -55,3 +86,13 @@ if __name__ == '__main__':
         
     finally:
         sys.stderr = old_stderr
+
+# --- Node 4: Reflect ---
+def reflection_node(state: AgentState):
+    print("--- REFLECTING ---")
+    response = reflect_chain.invoke({
+        "requirement": state["requirement"],
+        "code": state["code"],
+        "error": state["error"]
+    })
+    return {"reflection": response.content}

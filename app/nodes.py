@@ -16,7 +16,7 @@ def generation_node(state: AgentState):
     print("--- GENERATING SOLUTION ---")
     response = generate_chain.invoke({
         "requirement": state["requirement"],
-        "test_code": state["test_code"], # Pass tests so it knows what to satisfy
+        "test_code": state["test_code"],
         "code": state.get("code", ""),
         "error": state.get("error", ""),
         "reflection": state.get("reflection", "")
@@ -29,52 +29,65 @@ def generation_node(state: AgentState):
         "error": None
     }
 
-# --- Node 3: Execute (Run Tests vs Solution) ---
+# --- Node 3: Execute (The Fix: Manual Test Loader) ---
 def execution_node(state: AgentState):
     print("--- EXECUTING TESTS ---")
     
     solution_code = state["code"]
     test_code = state["test_code"]
     
-    # Python Hack: Dynamically create a module named 'solution'
+    # We explicitly find the test class and run it, instead of relying on unittest.main()
     full_script = f"""
 import sys
+import unittest
 from types import ModuleType
 
 # 1. Create fake module
 sol = ModuleType('solution')
 sys.modules['solution'] = sol
-
-# 2. Load the solution code into that module
 exec('''{solution_code}''', sol.__dict__)
 
-# 3. Run the unit tests
+# 2. Load the tests
 {test_code}
 
-# 4. Safety net for unittest
+# 3. FORCE RUN
 if __name__ == '__main__':
-    import unittest
-    try:
-        unittest.main(exit=False)
-    except:
-        pass
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+
+    # Find the Test Class dynamically (Look for any class inheriting from TestCase)
+    test_cases = [obj for name, obj in locals().items() 
+                  if isinstance(obj, type) and issubclass(obj, unittest.TestCase)]
+    
+    for test_class in test_cases:
+        suite.addTests(loader.loadTestsFromTestCase(test_class))
+
+    # Run with a text runner so we capture the output
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    if not result.wasSuccessful():
+        print("FAILED")
+        sys.exit(1)
 """
     
     old_stderr = sys.stderr
     sys.stderr = io.StringIO()
     
     try:
-        # EXECUTE
         exec(full_script, {'__name__': '__main__'})
         output_log = sys.stderr.getvalue()
         
+        # Double check if it actually ran tests
+        if "Ran 0 tests" in output_log or "NO TESTS RAN" in output_log:
+             return {"output": output_log, "error": "No tests were found to run!"}
+
         if "FAILED" in output_log or "Error" in output_log:
             return {"output": output_log, "error": output_log}
         else:
             return {"output": output_log, "error": None}
             
     except SystemExit:
-        # CRITICAL FIX: Catch the "Exit" command from unittest so the app stays alive!
         output_log = sys.stderr.getvalue()
         if "FAILED" in output_log or "Error" in output_log:
             return {"output": output_log, "error": output_log}
